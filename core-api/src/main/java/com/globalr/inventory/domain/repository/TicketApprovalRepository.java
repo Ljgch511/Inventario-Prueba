@@ -1,0 +1,11 @@
+package com.globalr.inventory.domain.repository;
+
+import com.globalr.inventory.domain.model.TicketApprovalEntity;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.List;
+import java.util.UUID;
+
+public interface TicketApprovalRepository extends JpaRepository<TicketApprovalEntity, UUID> {
+    List<TicketApprovalEntity> findByTicketIdOrderByCreatedAtAsc(UUID ticketId);
+}

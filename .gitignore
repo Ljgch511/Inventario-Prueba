@@ -1,0 +1,23 @@
+# Environment & secrets
+.env
+
+# Node / Vite
+node_modules/
+dist/
+
+# Java / Maven / Quarkus
+target/
+
+# Android / Gradle
+.gradle/
+build/
+local.properties
+*.apk
+
+# IDE & OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+*.log

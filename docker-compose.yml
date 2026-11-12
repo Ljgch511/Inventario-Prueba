@@ -1,0 +1,212 @@
+services:
+  globalr-db:
+    image: postgres:16-alpine
+    container_name: globalr-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - globalr_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - globalr-net
+
+  globalr-minio:
+    image: pgsty/silo:latest
+    container_name: globalr-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - globalr_minio_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live || mc ready local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - globalr-net
+
+  globalr-minio-init:
+    image: pgsty/silo:latest
+    container_name: globalr-minio-init
+    depends_on:
+      globalr-minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://globalr-minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
+      mc mb --ignore-existing local/${MINIO_BUCKET};
+      exit 0;
+      "
+    networks:
+      - globalr-net
+
+  globalr-mailpit:
+    image: axllent/mailpit:latest
+    container_name: globalr-mailpit
+    restart: unless-stopped
+    environment:
+      MP_WEBROOT: /mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - globalr-net
+
+  globalr-sat-crypto:
+    build:
+      context: ./satellites/sat-crypto
+      dockerfile: Dockerfile.jvm
+    container_name: globalr-sat-crypto
+    restart: unless-stopped
+    environment:
+      CRYPTO_AES_MASTER_KEY: ${CRYPTO_AES_MASTER_KEY}
+      QUARKUS_HTTP_PORT: 8081
+    ports:
+      - "8081:8081"
+    volumes:
+      - globalr_crypto_keys:/app/keys
+    networks:
+      - globalr-net
+
+  globalr-sat-pdf:
+    build:
+      context: ./satellites/sat-pdf
+      dockerfile: Dockerfile.jvm
+    container_name: globalr-sat-pdf
+    restart: unless-stopped
+    depends_on:
+      globalr-minio:
+        condition: service_healthy
+    environment:
+      QUARKUS_HTTP_PORT: 8082
+      MINIO_ENDPOINT: http://globalr-minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    ports:
+      - "8082:8082"
+    networks:
+      - globalr-net
+
+  globalr-sat-media:
+    build:
+      context: ./satellites/sat-media
+      dockerfile: Dockerfile.jvm
+    container_name: globalr-sat-media
+    restart: unless-stopped
+    depends_on:
+      globalr-minio:
+        condition: service_healthy
+    environment:
+      QUARKUS_HTTP_PORT: 8083
+      MINIO_ENDPOINT: http://globalr-minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    ports:
+      - "8083:8083"
+    networks:
+      - globalr-net
+
+  globalr-sat-notify:
+    build:
+      context: ./satellites/sat-notify
+      dockerfile: Dockerfile.jvm
+    container_name: globalr-sat-notify
+    restart: unless-stopped
+    depends_on:
+      - globalr-mailpit
+    environment:
+      QUARKUS_HTTP_PORT: 8084
+      QUARKUS_MAILER_HOST: ${SMTP_HOST}
+      QUARKUS_MAILER_PORT: ${SMTP_PORT}
+      QUARKUS_MAILER_FROM: ${MAIL_FROM}
+      QUARKUS_MAILER_MOCK: "false"
+    ports:
+      - "8084:8084"
+    networks:
+      - globalr-net
+
+  globalr-core-api:
+    build:
+      context: ./core-api
+      dockerfile: Dockerfile
+    container_name: globalr-core-api
+    restart: unless-stopped
+    depends_on:
+      globalr-db:
+        condition: service_healthy
+      globalr-sat-crypto:
+        condition: service_started
+      globalr-sat-pdf:
+        condition: service_started
+      globalr-sat-media:
+        condition: service_started
+      globalr-sat-notify:
+        condition: service_started
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://globalr-db:5432/${POSTGRES_DB}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      APP_JWT_SECRET: ${JWT_SECRET}
+      SAT_CRYPTO_URL: http://globalr-sat-crypto:8081
+      SAT_PDF_URL: http://globalr-sat-pdf:8082
+      SAT_MEDIA_URL: http://globalr-sat-media:8083
+      SAT_NOTIFY_URL: http://globalr-sat-notify:8084
+    ports:
+      - "8080:8080"
+    networks:
+      - globalr-net
+
+  globalr-web:
+    build:
+      context: ./frontend-web
+      dockerfile: Dockerfile
+    container_name: globalr-web
+    restart: unless-stopped
+    networks:
+      - globalr-net
+
+  globalr-proxy:
+    build:
+      context: ./infra/nginx
+      dockerfile: Dockerfile
+    container_name: globalr-proxy
+    restart: unless-stopped
+    depends_on:
+      - globalr-core-api
+      - globalr-sat-crypto
+      - globalr-web
+      - globalr-mailpit
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - globalr_tls_certs:/etc/nginx/certs
+    networks:
+      - globalr-net
+
+volumes:
+  globalr_pgdata:
+  globalr_minio_data:
+  globalr_crypto_keys:
+  globalr_tls_certs:
+
+networks:
+  globalr-net:
+    driver: bridge

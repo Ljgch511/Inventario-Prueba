@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.GlobalRMobile" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">#0F4C81</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorSecondary">#2563EB</item>
+    </style>
+</resources>
