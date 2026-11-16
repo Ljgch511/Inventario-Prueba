@@ -1,0 +1,27 @@
+# Environment & secrets
+.env
+*.env.local
+
+# Node & Frontend
+node_modules/
+dist/
+.npm/
+
+# Java & Backend (Maven / Gradle)
+target/
+.mvn/wrapper/maven-wrapper.jar
+.gradle/
+build/
+local.properties
+
+# Mobile & Binaries
+*.apk
+*.aab
+
+# IDE & OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
